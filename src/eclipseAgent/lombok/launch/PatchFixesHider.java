@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2015 The Project Lombok Authors.
+ * Copyright (C) 2010-2019 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 
-import lombok.eclipse.EclipseAugments;
-
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jdt.core.IAnnotatable;
 import org.eclipse.jdt.core.IAnnotation;
@@ -40,6 +38,7 @@ import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaModelException;
+import org.eclipse.jdt.core.dom.ArrayType;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.SimpleName;
 import org.eclipse.jdt.core.search.SearchMatch;
@@ -63,6 +62,8 @@ import org.eclipse.jdt.internal.core.dom.rewrite.RewriteEvent;
 import org.eclipse.jdt.internal.core.dom.rewrite.TokenScanner;
 import org.eclipse.jdt.internal.corext.refactoring.SearchResultGroup;
 import org.eclipse.jdt.internal.corext.refactoring.structure.ASTNodeSearchUtil;
+
+import lombok.eclipse.EclipseAugments;
 
 /** These contain a mix of the following:
  * <ul>
@@ -92,7 +93,7 @@ final class PatchFixesHider {
 						shadowLoader = Util.class.getClassLoader();
 					} catch (ClassNotFoundException e) {
 						// If we get here, it isn't, and we should use the shadowloader.
-						shadowLoader = Main.createShadowClassLoader();
+						shadowLoader = Main.getShadowClassLoader();
 					}
 				}
 				
@@ -315,7 +316,17 @@ final class PatchFixesHider {
 			}
 			return result;
 		}
-		
+
+		public static boolean isGenerated(org.eclipse.jdt.internal.compiler.ast.ASTNode node) {
+			boolean result = false;
+			try {
+				result = node.getClass().getField("$generatedBy").get(node) != null;
+			} catch (Exception e) {
+				// better to assume it isn't generated
+			}
+			return result;
+		}
+
 		public static boolean isListRewriteOnGeneratedNode(org.eclipse.jdt.core.dom.rewrite.ListRewrite rewrite) {
 			return isGenerated(rewrite.getParent());
 		}
@@ -476,8 +487,10 @@ final class PatchFixesHider {
 			return original == -1 ? start : original;
 		}
 		
-		public static int fixRetrieveIdentifierEndPosition(int original, int end) {
-			return original == -1 ? end : original;
+		public static int fixRetrieveIdentifierEndPosition(int original, int start, int end) {
+			if (original == -1) return end;
+			if (original < start) return end;
+			return original;
 		}
 		
 		public static int fixRetrieveEllipsisStartPosition(int original, int end) {
@@ -502,6 +515,12 @@ final class PatchFixesHider {
 			if (retVal != -1 || fd == null) return retVal;
 			boolean isGenerated = EclipseAugments.ASTNode_generatedBy.get(fd) != null;
 			if (isGenerated) return fd.declarationSourceEnd;
+			return -1;
+		}
+		
+		public static int fixRetrieveProperRightBracketPosition(int retVal, ArrayType arrayType) {
+			if (retVal != -1 || arrayType == null) return retVal;
+			if (isGenerated(arrayType)) return arrayType.getStartPosition() + arrayType.getLength() - 1;
 			return -1;
 		}
 		
@@ -551,7 +570,7 @@ final class PatchFixesHider {
 			// Since Eclipse doesn't honor the "insert at specified location" for already existing members,
 			// we'll just add them last
 			newChildren.addAll(modifiedChildren);
-			return newChildren.toArray(new RewriteEvent[newChildren.size()]);
+			return newChildren.toArray(new RewriteEvent[0]);
 		}
 		
 		public static int getTokenEndOffsetFixed(TokenScanner scanner, int token, int startOffset, Object domNode) throws CoreException {
@@ -570,7 +589,7 @@ final class PatchFixesHider {
 			for (IMethod m : methods) {
 				if (m.getNameRange().getLength() > 0 && !m.getNameRange().equals(m.getSourceRange())) result.add(m);
 			}
-			return result.size() == methods.length ? methods : result.toArray(new IMethod[result.size()]);
+			return result.size() == methods.length ? methods : result.toArray(new IMethod[0]);
 		}
 		
 		public static SearchMatch[] removeGenerated(SearchMatch[] returnValue) {
@@ -591,7 +610,7 @@ final class PatchFixesHider {
 				}
 				result.add(searchResult);
 			}
-			return result.toArray(new SearchMatch[result.size()]);
+			return result.toArray(new SearchMatch[0]);
 		}
 		
 		public static SearchResultGroup[] createFakeSearchResult(SearchResultGroup[] returnValue,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 The Project Lombok Authors.
+ * Copyright (C) 2013-2018 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,13 @@
  */
 package lombok.core;
 
+import java.net.URI;
 import java.util.Collections;
 
 import lombok.core.configuration.BubblingConfigurationResolver;
+import lombok.core.configuration.ConfigurationFileToSource;
 import lombok.core.configuration.ConfigurationKey;
+import lombok.core.configuration.ConfigurationParser;
 import lombok.core.configuration.ConfigurationProblemReporter;
 import lombok.core.configuration.ConfigurationResolver;
 import lombok.core.configuration.ConfigurationResolverFactory;
@@ -44,7 +47,7 @@ public class LombokConfiguration {
 	static {
 		if (System.getProperty("lombok.disableConfig") != null) {
 			configurationResolverFactory = new ConfigurationResolverFactory() {
-				@Override public ConfigurationResolver createResolver(AST<?, ?, ?> ast) {
+				@Override public ConfigurationResolver createResolver(URI sourceLocation) {
 					return NULL_RESOLVER;
 				}
 			};
@@ -63,13 +66,18 @@ public class LombokConfiguration {
 	}
 	
 	static <T> T read(ConfigurationKey<T> key, AST<?, ?, ?> ast) {
-		return configurationResolverFactory.createResolver(ast).resolve(key);
+		return read(key, ast.getAbsoluteFileLocation());
+	}
+	
+	public static <T> T read(ConfigurationKey<T> key, URI sourceLocation) {
+		return configurationResolverFactory.createResolver(sourceLocation).resolve(key);
 	}
 	
 	private static ConfigurationResolverFactory createFileSystemBubblingResolverFactory() {
+		final ConfigurationFileToSource fileToSource = cache.fileToSource(new ConfigurationParser(ConfigurationProblemReporter.CONSOLE));
 		return new ConfigurationResolverFactory() {
-			@Override public ConfigurationResolver createResolver(AST<?, ?, ?> ast) {
-				return new BubblingConfigurationResolver(cache.sourcesForJavaFile(ast.getAbsoluteFileLocation(), ConfigurationProblemReporter.CONSOLE));
+			@Override public ConfigurationResolver createResolver(URI sourceLocation) {
+				return new BubblingConfigurationResolver(cache.forUri(sourceLocation), fileToSource);
 			}
 		};
 	}

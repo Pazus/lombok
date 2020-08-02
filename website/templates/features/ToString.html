@@ -29,6 +29,10 @@
 		</dt><dd>
 			If set to <code>true</code>, lombok will access fields directly instead of using getters (if available) when generating <code>toString</code> methods. The annotation parameter '<code>doNotUseGetters</code>', if explicitly specified, takes precedence over this setting.
 		</dd><dt>
+			<code>lombok.toString.callSuper</code> = [<code>call</code> | <code>skip</code> | <code>warn</code>] (default: skip)
+		</dt><dd>
+			If set to <code>call</code>, lombok will generate calls to the superclass implementation of <code>toString</code> if your class extends something. If set to <code>skip</code> no such call is generated. If set to <code>warn</code> no such call is generated either, but lombok does generate a warning to tell you about it.
+		</dd><dt>
 			<code>lombok.toString.flagUsage</code> = [<code>warning</code> | <code>error</code>] (default: not set)
 		</dt><dd>
 			Lombok will flag any usage of <code>@ToString</code> as a warning or error if configured.
@@ -55,6 +59,8 @@
 			<code>@ToString(doNotUseGetters = true)</code>
 		</p><p>
 			<code>@ToString</code> can also be used on an enum definition.
+		</p><p>
+			If you have configured a nullity annotation flavour via <a href="configuration"><code>lombok.config</code></a> key <code>lombok.addNullAnnotations</code>, the method or return type (as appropriate for the chosen flavour) is annotated with a non-null annotation.
 		</p>
 	</@f.smallPrint>
 </@f.scaffold>

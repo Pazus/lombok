@@ -69,7 +69,8 @@ public class RunTestsViaEcj extends AbstractRunTests {
 		warnings.put(CompilerOptions.OPTION_ReportUnusedLabel, "ignore");
 		warnings.put(CompilerOptions.OPTION_ReportUnusedImport, "ignore");
 		warnings.put(CompilerOptions.OPTION_ReportUnusedPrivateMember, "ignore");
-		warnings.put(CompilerOptions.OPTION_Source, "1." + Eclipse.getEcjCompilerVersion());
+		int ecjVersion = Eclipse.getEcjCompilerVersion();
+		warnings.put(CompilerOptions.OPTION_Source, (ecjVersion < 9 ? "1." : "") + ecjVersion);
 		options.set(warnings);
 		return options;
 	}
@@ -92,7 +93,7 @@ public class RunTestsViaEcj extends AbstractRunTests {
 	}
 	
 	@Override
-	public boolean transformCode(Collection<CompilerMessage> messages, StringWriter result, File file, String encoding, Map<String, String> formatPreferences) throws Throwable {
+	public boolean transformCode(Collection<CompilerMessage> messages, StringWriter result, File file, String encoding, Map<String, String> formatPreferences, int minVersion) throws Throwable {
 		final AtomicReference<CompilationResult> compilationResult_ = new AtomicReference<CompilationResult>();
 		final AtomicReference<CompilationUnitDeclaration> compilationUnit_ = new AtomicReference<CompilationUnitDeclaration>();
 		ICompilerRequestor bitbucketRequestor = new ICompilerRequestor() {
@@ -104,7 +105,7 @@ public class RunTestsViaEcj extends AbstractRunTests {
 		String source = readFile(file);
 		final CompilationUnit sourceUnit = new CompilationUnit(source.toCharArray(), file.getName(), encoding == null ? "UTF-8" : encoding);
 		
-		Compiler ecjCompiler = new Compiler(createFileSystem(file), ecjErrorHandlingPolicy(), ecjCompilerOptions(), bitbucketRequestor, new DefaultProblemFactory(Locale.ENGLISH)) {
+		Compiler ecjCompiler = new Compiler(createFileSystem(file, minVersion), ecjErrorHandlingPolicy(), ecjCompilerOptions(), bitbucketRequestor, new DefaultProblemFactory(Locale.ENGLISH)) {
 			@Override protected synchronized void addCompilationUnit(ICompilationUnit inUnit, CompilationUnitDeclaration parsedUnit) {
 				if (inUnit == sourceUnit) compilationUnit_.set(parsedUnit);
 				super.addCompilationUnit(inUnit, parsedUnit);
@@ -122,13 +123,15 @@ public class RunTestsViaEcj extends AbstractRunTests {
 		
 		CompilationUnitDeclaration cud = compilationUnit_.get();
 		
-		if (cud == null) result.append("---- NO CompilationUnit provided by ecj ----");
+		if (cud == null) result.append("---- No CompilationUnit provided by ecj ----");
 		else result.append(cud.toString());
 		
 		return true;
 	}
 	
-	private FileSystem createFileSystem(File file) {
+	private static final String bootRuntimePath = System.getProperty("delombok.bootclasspath");
+	
+	private FileSystem createFileSystem(File file, int minVersion) {
 		List<String> classpath = new ArrayList<String>();
 		for (Iterator<String> i = classpath.iterator(); i.hasNext();) {
 			if (FileSystem.getClasspath(i.next(), "UTF-8", null) == null) {
@@ -137,16 +140,14 @@ public class RunTestsViaEcj extends AbstractRunTests {
 		}
 		if (new File("bin").exists()) classpath.add("bin");
 		classpath.add("dist/lombok.jar");
-		classpath.add("lib/oracleJDK8Environment/rt.jar");
-		classpath.add("lib/test/commons-logging-commons-logging.jar");
-		classpath.add("lib/test/org.slf4j-slf4j-api.jar");
-		classpath.add("lib/test/org.slf4j-slf4j-ext.jar");
-		classpath.add("lib/test/log4j-log4j.jar");
-		classpath.add("lib/test/org.apache.logging.log4j-log4j-api.jar");
-		classpath.add("lib/test/org.jboss.logging-jboss-logging.jar");
-		classpath.add("lib/test/com.google.guava-guava.jar");
-		classpath.add("lib/test/com.google.code.findbugs-findbugs.jar");
-		classpath.add("lib/test/com.google.flogger-flogger.jar");
+		if (bootRuntimePath == null || bootRuntimePath.isEmpty()) throw new IllegalStateException("System property delombok.bootclasspath is not set; set it to the rt of java6 or java8");
+		classpath.add(bootRuntimePath);
+		for (File f : new File("lib/test").listFiles()) {
+			String fn = f.getName();
+			if (fn.length() < 4) continue;
+			if (!fn.substring(fn.length() - 4).toLowerCase().equals(".jar")) continue;
+			classpath.add("lib/test/" + fn);
+		}
 		return new FileSystem(classpath.toArray(new String[0]), new String[] {file.getAbsolutePath()}, "UTF-8");
 	}
 }

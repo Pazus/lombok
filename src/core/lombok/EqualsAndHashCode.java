@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 The Project Lombok Authors.
+ * Copyright (C) 2009-2020 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -97,6 +97,8 @@ public @interface EqualsAndHashCode {
 	/**
 	 * Only include fields and methods explicitly marked with {@code @EqualsAndHashCode.Include}.
 	 * Normally, all (non-static, non-transient) fields are included by default.
+	 * 
+	 * @return If {@code true}, don't include non-static non-transient fields automatically (default: {@code false}).
 	 */
 	boolean onlyExplicitlyIncluded() default false;
 	
@@ -113,7 +115,21 @@ public @interface EqualsAndHashCode {
 	@Target({ElementType.FIELD, ElementType.METHOD})
 	@Retention(RetentionPolicy.SOURCE)
 	public @interface Include {
-		/** Defaults to the method name of the annotated member. If on a method and the name equals the name of a default-included field, this member takes its place. */
+		/**
+		 * Defaults to the method name of the annotated member.
+		 * If on a method and the name equals the name of a default-included field, this member takes its place.
+		 * 
+		 * @return If present, this method serves as replacement for the named field.
+		 */
 		String replaces() default "";
+
+		/**
+		 * Higher ranks are considered first. Members of the same rank are considered in the order they appear in the source file.
+		 * 
+		 * If not explicitly set, the {@code default} rank for primitives is 1000, and for primitive wrappers 800.
+		 * 
+		 * @return ordering within the generating {@code equals} and {@code hashCode} methods; higher numbers are considered first.
+		 */
+		int rank() default 0;
 	}
 }

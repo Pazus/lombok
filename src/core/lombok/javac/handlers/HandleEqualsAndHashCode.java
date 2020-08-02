@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 The Project Lombok Authors.
+ * Copyright (C) 2009-2020 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@ import static lombok.core.handlers.HandlerUtil.handleFlagUsage;
 import static lombok.javac.Javac.*;
 import static lombok.javac.handlers.JavacHandlerUtil.*;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,6 +59,7 @@ import lombok.EqualsAndHashCode;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
 import lombok.core.configuration.CallSuperType;
+import lombok.core.configuration.CheckerFrameworkVersion;
 import lombok.core.handlers.HandlerUtil;
 import lombok.core.handlers.HandlerUtil.FieldAccess;
 import lombok.core.handlers.InclusionExclusionUtils;
@@ -202,7 +204,10 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 		JavacTreeMaker maker = typeNode.getTreeMaker();
 		
 		JCAnnotation overrideAnnotation = maker.Annotation(genJavaLangTypeRef(typeNode, "Override"), List.<JCExpression>nil());
-		JCModifiers mods = maker.Modifiers(Flags.PUBLIC, List.of(overrideAnnotation));
+		List<JCAnnotation> annsOnMethod = List.of(overrideAnnotation);
+		CheckerFrameworkVersion checkerFramework = getCheckerFrameworkVersion(typeNode);
+		if (checkerFramework.generateSideEffectFree()) annsOnMethod = annsOnMethod.prepend(maker.Annotation(genTypeRef(typeNode, CheckerFrameworkVersion.NAME__SIDE_EFFECT_FREE), List.<JCExpression>nil()));
+		JCModifiers mods = maker.Modifiers(Flags.PUBLIC, annsOnMethod);
 		JCExpression returnType = maker.TypeIdent(CTC_INT);
 		ListBuffer<JCStatement> statements = new ListBuffer<JCStatement>();
 		
@@ -210,8 +215,10 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 		Name resultName = typeNode.toName(RESULT_NAME);
 		long finalFlag = JavacHandlerUtil.addFinalIfNeeded(0L, typeNode.getContext());
 		
+		boolean isEmpty = members.isEmpty();
+		
 		/* final int PRIME = X; */ {
-			if (!members.isEmpty()) {
+			if (!isEmpty) {
 				statements.append(maker.VarDef(maker.Modifiers(finalFlag), primeName, maker.TypeIdent(CTC_INT), maker.Literal(HandlerUtil.primeForHashcode())));
 			}
 		}
@@ -227,12 +234,12 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 				/* ... 1; */
 				init = maker.Literal(1);
 			}
-			statements.append(maker.VarDef(maker.Modifiers(0), resultName, maker.TypeIdent(CTC_INT), init));
+			statements.append(maker.VarDef(maker.Modifiers(isEmpty ? finalFlag : 0), resultName, maker.TypeIdent(CTC_INT), init));
 		}
 		
 		for (Included<JavacNode, EqualsAndHashCode.Include> member : members) {
 			JavacNode memberNode = member.getNode();
-			JCExpression fType = getFieldType(memberNode, fieldAccess);
+			JCExpression fType = unnotate(getFieldType(memberNode, fieldAccess));
 			boolean isMethod = memberNode.getKind() == Kind.METHOD;
 			
 			JCExpression fieldAccessor = isMethod ? createMethodAccessor(maker, memberNode) : createFieldAccessor(maker, memberNode, fieldAccess);
@@ -277,9 +284,10 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 					break;
 				}
 			} else if (fType instanceof JCArrayTypeTree) {
+				JCArrayTypeTree array = (JCArrayTypeTree) fType;
 				/* java.util.Arrays.deepHashCode(this.fieldName) //use just hashCode() for primitive arrays. */
-				boolean multiDim = ((JCArrayTypeTree) fType).elemtype instanceof JCArrayTypeTree;
-				boolean primitiveArray = ((JCArrayTypeTree) fType).elemtype instanceof JCPrimitiveTypeTree;
+				boolean multiDim = unnotate(array.elemtype) instanceof JCArrayTypeTree;
+				boolean primitiveArray = unnotate(array.elemtype) instanceof JCPrimitiveTypeTree;
 				boolean useDeepHC = multiDim || !primitiveArray;
 				
 				JCExpression hcMethod = chainDots(typeNode, "java", "util", "Arrays", useDeepHC ? "deepHashCode" : "hashCode");
@@ -373,15 +381,32 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 		Name otherName = typeNode.toName("other");
 		Name thisName = typeNode.toName("this");
 		
+		List<JCAnnotation> annsOnParamOnMethod = List.nil();
+		
 		JCAnnotation overrideAnnotation = maker.Annotation(genJavaLangTypeRef(typeNode, "Override"), List.<JCExpression>nil());
-		JCModifiers mods = maker.Modifiers(Flags.PUBLIC, List.of(overrideAnnotation));
-		JCExpression objectType = genJavaLangTypeRef(typeNode, "Object");
+		List<JCAnnotation> annsOnMethod = List.of(overrideAnnotation);
+		CheckerFrameworkVersion checkerFramework = getCheckerFrameworkVersion(typeNode);
+		if (checkerFramework.generateSideEffectFree()) {
+			annsOnMethod = annsOnMethod.prepend(maker.Annotation(genTypeRef(typeNode, CheckerFrameworkVersion.NAME__SIDE_EFFECT_FREE), List.<JCExpression>nil()));
+		}
+		JCModifiers mods = maker.Modifiers(Flags.PUBLIC, annsOnMethod);
+		JCExpression objectType;
+		if (annsOnParamOnMethod.isEmpty()) {
+			objectType = genJavaLangTypeRef(typeNode, "Object");
+		} else {
+			objectType = chainDots(typeNode, "java", "lang", "Object");
+			objectType = maker.AnnotatedType(annsOnParamOnMethod, objectType);
+		}
+		
 		JCExpression returnType = maker.TypeIdent(CTC_BOOLEAN);
 		
 		long finalFlag = JavacHandlerUtil.addFinalIfNeeded(0L, typeNode.getContext());
 		
 		ListBuffer<JCStatement> statements = new ListBuffer<JCStatement>();
-		final List<JCVariableDecl> params = List.of(maker.VarDef(maker.Modifiers(finalFlag | Flags.PARAMETER, onParam), oName, objectType, null));
+		JCVariableDecl param = maker.VarDef(maker.Modifiers(finalFlag | Flags.PARAMETER, onParam), oName, objectType, null);
+		JavacHandlerUtil.createRelevantNullableAnnotation(typeNode, param);
+		
+		final List<JCVariableDecl> params = List.of(param);
 		
 		/* if (o == this) return true; */ {
 			statements.append(maker.If(maker.Binary(CTC_EQUAL, maker.Ident(oName),
@@ -428,7 +453,7 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 			JavacNode memberNode = member.getNode();
 			boolean isMethod = memberNode.getKind() == Kind.METHOD;
 			
-			JCExpression fType = getFieldType(memberNode, fieldAccess);
+			JCExpression fType = unnotate(getFieldType(memberNode, fieldAccess));
 			JCExpression thisFieldAccessor = isMethod ? createMethodAccessor(maker, memberNode) : createFieldAccessor(maker, memberNode, fieldAccess);
 			JCExpression otherFieldAccessor = isMethod ? createMethodAccessor(maker, memberNode, maker.Ident(otherName)) : createFieldAccessor(maker, memberNode, fieldAccess, maker.Ident(otherName));
 			if (fType instanceof JCPrimitiveTypeTree) {
@@ -448,9 +473,10 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 					break;
 				}
 			} else if (fType instanceof JCArrayTypeTree) {
+				JCArrayTypeTree array = (JCArrayTypeTree) fType;
 				/* if (!java.util.Arrays.deepEquals(this.fieldName, other.fieldName)) return false; //use equals for primitive arrays. */
-				boolean multiDim = ((JCArrayTypeTree) fType).elemtype instanceof JCArrayTypeTree;
-				boolean primitiveArray = ((JCArrayTypeTree) fType).elemtype instanceof JCPrimitiveTypeTree;
+				boolean multiDim = unnotate(array.elemtype) instanceof JCArrayTypeTree;
+				boolean primitiveArray = unnotate(array.elemtype) instanceof JCPrimitiveTypeTree;
 				boolean useDeepEquals = multiDim || !primitiveArray;
 				
 				JCExpression eqMethod = chainDots(typeNode, "java", "util", "Arrays", useDeepEquals ? "deepEquals" : "equals");
@@ -492,13 +518,20 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 		 */
 		JavacTreeMaker maker = typeNode.getTreeMaker();
 		
-		JCModifiers mods = maker.Modifiers(Flags.PROTECTED, List.<JCAnnotation>nil());
+		List<JCAnnotation> annsOnMethod = List.nil();
+		CheckerFrameworkVersion checkerFramework = getCheckerFrameworkVersion(typeNode);
+		if (checkerFramework.generatePure()) {
+			annsOnMethod = annsOnMethod.prepend(maker.Annotation(genTypeRef(typeNode, CheckerFrameworkVersion.NAME__PURE), List.<JCExpression>nil()));
+		}
+		JCModifiers mods = maker.Modifiers(Flags.PROTECTED, annsOnMethod);
 		JCExpression returnType = maker.TypeIdent(CTC_BOOLEAN);
 		Name canEqualName = typeNode.toName("canEqual");
 		JCExpression objectType = genJavaLangTypeRef(typeNode, "Object");
 		Name otherName = typeNode.toName("other");
 		long flags = JavacHandlerUtil.addFinalIfNeeded(Flags.PARAMETER, typeNode.getContext());
-		List<JCVariableDecl> params = List.of(maker.VarDef(maker.Modifiers(flags, onParam), otherName, objectType, null));
+		JCVariableDecl param = maker.VarDef(maker.Modifiers(flags, onParam), otherName, objectType, null);
+		createRelevantNullableAnnotation(typeNode, param);
+		List<JCVariableDecl> params = List.of(param);
 		
 		JCBlock body = maker.Block(0, List.<JCStatement>of(
 			maker.Return(maker.TypeTest(maker.Ident(otherName), createTypeReference(typeNode, false)))));
@@ -519,5 +552,31 @@ public class HandleEqualsAndHashCode extends JavacAnnotationHandler<EqualsAndHas
 	
 	public JCStatement returnBool(JavacTreeMaker maker, boolean bool) {
 		return maker.Return(maker.Literal(CTC_BOOLEAN, bool ? 1 : 0));
+	}
+	
+	private boolean jcAnnotatedTypeInit;
+	private Class<?> jcAnnotatedTypeClass = null;
+	private Field jcAnnotatedTypeUnderlyingTypeField = null;
+	
+	private JCExpression unnotate(JCExpression type) {
+		if (!isJcAnnotatedType(type)) return type;
+		if (jcAnnotatedTypeUnderlyingTypeField == null) return type;
+		try {
+			return (JCExpression) jcAnnotatedTypeUnderlyingTypeField.get(type);
+		} catch (Exception ignore) {}
+		return type;
+	}
+	
+	private boolean isJcAnnotatedType(JCExpression o) {
+		if (o == null) return false;
+		if (!jcAnnotatedTypeInit) {
+			try {
+				jcAnnotatedTypeClass = Class.forName("com.sun.tools.javac.tree.JCTree$JCAnnotatedType", false, o.getClass().getClassLoader());
+				jcAnnotatedTypeUnderlyingTypeField = jcAnnotatedTypeClass.getDeclaredField("underlyingType");
+			}
+			catch (Exception ignore) {}
+			jcAnnotatedTypeInit = true;
+		}
+		return jcAnnotatedTypeClass == o.getClass();
 	}
 }

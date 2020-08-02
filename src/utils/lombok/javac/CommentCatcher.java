@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2014 The Project Lombok Authors.
+ * Copyright (C) 2011-2019 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.List;
 
 import lombok.core.FieldAugment;
+import lombok.permit.Permit;
 
 import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
@@ -34,9 +35,10 @@ import com.sun.tools.javac.util.Context;
 public class CommentCatcher {
 	private final JavaCompiler compiler;
 	public static final FieldAugment<JCCompilationUnit, List<CommentInfo>> JCCompilationUnit_comments = FieldAugment.augment(JCCompilationUnit.class, List.class, "lombok$comments");
+	public static final FieldAugment<JCCompilationUnit, List<Integer>> JCCompilationUnit_textBlockStarts = FieldAugment.augment(JCCompilationUnit.class, List.class, "lombok$textBlockStarts");
 	
-	public static CommentCatcher create(Context context) {
-		registerCommentsCollectingScannerFactory(context);
+	public static CommentCatcher create(Context context, boolean findTextBlocks) {
+		registerCommentsCollectingScannerFactory(context, findTextBlocks);
 		JavaCompiler compiler = new JavaCompiler(context);
 		
 		setInCompiler(compiler, context);
@@ -68,7 +70,12 @@ public class CommentCatcher {
 		return list == null ? Collections.<CommentInfo>emptyList() : list;
 	}
 	
-	private static void registerCommentsCollectingScannerFactory(Context context) {
+	public List<Integer> getTextBlockStarts(JCCompilationUnit ast) {
+		List<Integer> list = JCCompilationUnit_textBlockStarts.get(ast);
+		return list == null ? Collections.<Integer>emptyList() : list;
+	}
+	
+	private static void registerCommentsCollectingScannerFactory(Context context, boolean findTextBlocks) {
 		try {
 			Class<?> scannerFactory;
 			int javaCompilerVersion = Javac.getJavaCompilerVersion();
@@ -78,8 +85,9 @@ public class CommentCatcher {
 				scannerFactory = Class.forName("lombok.javac.java7.CommentCollectingScannerFactory");
 			} else {
 				scannerFactory = Class.forName("lombok.javac.java8.CommentCollectingScannerFactory");
+				if (findTextBlocks) Permit.getField(scannerFactory, "findTextBlocks").set(null, true);
 			}
-			scannerFactory.getMethod("preRegister", Context.class).invoke(null, context);
+			Permit.getMethod(scannerFactory, "preRegister", Context.class).invoke(null, context);
 		} catch (InvocationTargetException e) {
 			throw Javac.sneakyThrow(e.getCause());
 		} catch (Exception e) {
@@ -100,7 +108,7 @@ public class CommentCatcher {
 			} else {
 				parserFactory = Class.forName("lombok.javac.java9.CommentCollectingParserFactory");
 			}
-			parserFactory.getMethod("setInCompiler", JavaCompiler.class, Context.class).invoke(null, compiler, context);
+			Permit.getMethod(parserFactory, "setInCompiler", JavaCompiler.class, Context.class).invoke(null, compiler, context);
 		} catch (InvocationTargetException e) {
 			throw Javac.sneakyThrow(e.getCause());
 		} catch (Exception e) {

@@ -34,22 +34,13 @@ import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.TypeElement;
-import javax.lang.model.type.TypeMirror;
-
-import org.mapstruct.ap.spi.AstModifyingAnnotationProcessor;
 
 import sun.misc.Unsafe;
 
 class AnnotationProcessorHider {
-	public static class AstModificationNotifier implements AstModifyingAnnotationProcessor {
-		@Override public boolean isTypeComplete(TypeMirror type) {
-			if (System.getProperty("lombok.disable") != null) return true;
-			return AstModificationNotifierData.lombokInvoked;
-		}
-	}
-	
-	static class AstModificationNotifierData {
-		volatile static boolean lombokInvoked = false;
+
+	public static class AstModificationNotifierData {
+		public volatile static boolean lombokInvoked = false;
 	}
 	
 	public static class AnnotationProcessor extends AbstractProcessor {
@@ -104,7 +95,7 @@ class AnnotationProcessorHider {
 		}
 		
 		private static AbstractProcessor createWrappedInstance() {
-			ClassLoader cl = Main.createShadowClassLoader();
+			ClassLoader cl = Main.getShadowClassLoader();
 			try {
 				Class<?> mc = cl.loadClass("lombok.core.AnnotationProcessor");
 				return (AbstractProcessor) mc.getDeclaredConstructor().newInstance();

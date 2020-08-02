@@ -15,9 +15,11 @@
 /.factorypath
 /lombok.iml
 /.idea
+*.iml
 *.markdown.html
 /junit*.properties
 /eclipse.location
 /.apt_generated/
 /out
 /website/lombokSupporters
+/pom.xml
